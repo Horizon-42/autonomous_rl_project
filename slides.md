@@ -55,6 +55,13 @@ $$
 
 ---
 
+## Bellman Equation
+$$
+v_\pi \dot{=} \sum_a{\pi(a|s)} \sum_{s',r}p(s', r|s, a)[r+\gamma v_\pi(s')]
+$$
+
+---
+
 # Model-Based algorithms
 ## Dynamic Prohramming
 
