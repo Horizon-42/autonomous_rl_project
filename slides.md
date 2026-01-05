@@ -18,9 +18,9 @@ style: |
 
 # Introduce of ReinforceReinforcement Learning
 Reinforcement learning is learning what to do—how to map situations to actions—so as to maximize a numerical reward signal.
-![alt text](rl.png)
+<img src="rl.png" alt="RL overview" width="80%">
 
-**A complete, interactive goal-seeking agent, explores and learn from (unknown) enviorment.**
+**A complete, interactive goal-seeking agent, explores and learn from enviorment.**
 
 ---
 
@@ -32,15 +32,22 @@ Reinforcement learning is learning what to do—how to map situations to actions
 - Model of the environment: allows **inferences** to be made about how the environment will behave.
 
 ---
+## Jetcar Example
+- Agent: the car
+- Enviroment: Runway and the rewards it given: 0 for runing, -1 for touch the obstcles.
+- Action Space: Throttle and steering control.
+- State: The poistion on the runway, with the speed of the car $S_t \dot{=} (x, y, v_x, v_y)$.
+- Policy: $\pi(a|s)$, What the control should be given under specific car state $S_t$?
+- Value Functions: $v_\pi(s)$, what is the total reward the car will gain after take specific action under state $s$?
+
+---
 
 ## Features of reinforcement learning
 - trial-and-error search
 - delayed reward
 
 ## Markov Process
-- sensation
-- action
-- goal
+
 
 ---
 
