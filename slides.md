@@ -34,9 +34,9 @@ Reinforcement learning is learning what to do—how to map situations to actions
 ---
 ## Jetcar Example
 - Agent: the car
-- Enviroment: Runway and the rewards it given: 0 for runing, -1 for touch the obstcles.
-- Action Space: Throttle and steering control.
-- State: The poistion on the runway, with the speed of the car $S_t \dot{=} (x, y, v_x, v_y)$.
+- Enviroment: Runway and the rewards it given: $r \in \mathcal{R}$, 0 for runing, -1 for touch the obstcles.
+- Action Space: $a\in \mathcal{A}$, Throttle and steering control.
+- State: $s \in \mathcal{S}$, the poistion on the runway, with the speed of the car $S_t \dot{=} (x, y, v_x, v_y)$.
 - Policy: $\pi(a|s)$, What the control should be given under specific car state $S_t$?
 - Value Functions: $v_\pi(s)$, what is the total reward the car will gain after take specific action under state $s$?
 
@@ -46,8 +46,12 @@ Reinforcement learning is learning what to do—how to map situations to actions
 - trial-and-error search
 - delayed reward
 
-## Markov Process
+## Markov decision Processes
+$$
+p(s', r|s, a) \dot{=} Pr\{ S_t=s', R_t = r | S_{t-1}=s, A_{t-1} = a \}
+$$
 
+**MDPs** model sequential decision making in which actions influence **immediate rewards** and **future states**.
 
 ---
 
@@ -71,6 +75,6 @@ Reinforcement learning is learning what to do—how to map situations to actions
 
 ---
 
-### Bellman Equations 
+
 
 ---
