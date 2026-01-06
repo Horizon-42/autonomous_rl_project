@@ -57,8 +57,12 @@ $$
 
 ## Bellman Equation
 $$
-v_\pi \dot{=} \sum_a{\pi(a|s)} \sum_{s',r}p(s', r|s, a)[r+\gamma v_\pi(s')]
+v_\pi(s) \dot{=} \sum_a{\pi(a|s)} \sum_{s', r}p(s', r|s, a)[r+\gamma v_\pi(s')]
 $$
+
+---
+
+<img src="Gemini_Generated_Image_axbqhpaxbqhpaxbq.png">
 
 ---
 
