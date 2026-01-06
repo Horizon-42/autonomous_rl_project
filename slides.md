@@ -34,11 +34,11 @@ Reinforcement learning is learning what to do—how to map situations to actions
 ---
 ## Jetcar Example
 - Agent: the car
-- Enviroment: Runway and the rewards it given: $r \in \mathcal{R}$, 0 for runing, -1 for touch the obstcles.
-- Action Space: $a\in \mathcal{A}$, Throttle and steering control.
-- State: $s \in \mathcal{S}$, the poistion on the runway, with the speed of the car $S_t \dot{=} (x, y, v_x, v_y)$.
-- Policy: $\pi(a|s)$, What the control should be given under specific car state $S_t$?
-- Value Functions: $v_\pi(s)$, what is the total reward the car will gain after take specific action under state $s$?
+- Environment: runway and the rewards it gives: $r \in \mathcal{R}$, 0 for running, -1 for touching obstacles.
+- Action: $a \in \mathcal{A}$, throttle and steering control.
+- State: $s \in \mathcal{S}$, the position on the runway and the speed of the car $s_t \dot{=} (x, y, v_x, v_y)$.
+- Policy: $\pi(a|s)$, what the control set should be under a specific state $s$.
+- Value Function: $v_\pi(s)$, the total reward the car will gain after taking a specific action in state $s$.
 
 ---
 
