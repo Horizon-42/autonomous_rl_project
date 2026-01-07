@@ -1,31 +1,18 @@
-"""Train a Duckietown (sim) policy to follow the lane centerline.
-
-This script is written to be easy to read and modify.
+"""Train a Duckietown (sim) policy with a JetRacer-style interface.
 
 Goal
 ----
-Learn a policy that keeps the car near the lane center and aligned with the lane direction.
-This is a good proxy for a JetRacer-style lane following task:
-- Observation: front RGB camera image
-- Action: [velocity, steering] in [-1, 1]
+Train a policy that can drive fast without leaving the drivable area.
+
+Action space (JetRacer-style)
+----------------------------
+- Action: [throttle, steering]
+    - throttle in [0, 1]
+    - steering in [-1, 1]
+
+Under the hood, DuckietownEnv expects (vel, angle) in [-1, 1].
 
 Notes
------
-- This uses Stable-Baselines3 (SB3). For classic Gym (not Gymnasium) compatibility,
-  use SB3 v1.x.
-- Duckietown (duckietown-gym-daffy 6.2.0) requires numpy<=1.20.0. Some newer
-  packages require newer NumPy; pin versions accordingly.
-
-Example
--------
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate duckie_clean
-
-# If SB3 isn't installed in this env yet:
-# pip install --no-deps stable-baselines3==1.8.0
-# (You also need torch installed; install via conda/pip as appropriate for your machine.)
-
-python train_jetracer_centerline.py --total-timesteps 200000
 """
 
 from __future__ import annotations
@@ -40,27 +27,70 @@ import numpy as np
 
 
 @dataclass(frozen=True)
-class RewardConfig:
-    """Weights for lane-following reward shaping."""
+class RaceRewardConfig:
+    """Reward shaping weights for a "race" objective.
 
-    # Positive term for moving forward along the lane direction
-    w_forward: float = 1.0
+    Key idea: maximize forward progress/speed, but heavily punish leaving the road.
+    """
+
+    # Reward for moving forward along the lane direction (progress proxy)
+    w_progress: float = 2.0
+
+    # Additional speed reward (helps policy commit to moving)
+    w_speed: float = 0.5
 
     # Penalty for lateral deviation from lane center (meters)
     w_center: float = 2.0
 
     # Penalty for heading misalignment (radians)
-    w_heading: float = 0.5
+    w_heading: float = 0.3
 
-    # Extra penalty when the episode ends due to leaving the drivable area
-    offroad_penalty: float = 10.0
+    # Penalty for steering magnitude (reduces "zig-zag")
+    w_steer: float = 0.10
+
+    # Penalty for steering change between steps
+    w_steer_rate: float = 0.05
+
+    # Proximity penalty term (Duckietown's collision-avoidance signal)
+    w_proximity: float = 40.0
+
+    # Big penalty when episode ends due to invalid pose / off-road
+    offroad_penalty: float = 50.0
+
+
+class JetRacerWrapper(gym.ActionWrapper):
+    """JetRacer-style action interface: [throttle, steering] -> Duckietown (vel, angle)."""
+
+    def __init__(self, env: gym.Env, v_scale: float = 0.4, omega_scale: float = 1.2):
+        super().__init__(env)
+        self._v_scale = float(v_scale)
+        self._omega_scale = float(omega_scale)
+
+        self.last_raw_action: Optional[np.ndarray] = None
+        self.last_mapped_action: Optional[np.ndarray] = None
+
+        self.action_space = gym.spaces.Box(
+            low=np.array([0.0, -1.0], dtype=np.float32),
+            high=np.array([1.0, 1.0], dtype=np.float32),
+            dtype=np.float32,
+        )
+
+    def action(self, action: np.ndarray) -> np.ndarray:
+        raw = np.asarray(action, dtype=np.float32)
+        throttle = float(raw[0])
+        steering = float(raw[1])
+
+        vel = np.clip(throttle * self._v_scale, -1.0, 1.0)
+        angle = np.clip(-steering * self._omega_scale, -1.0, 1.0)
+
+        mapped = np.array([vel, angle], dtype=np.float32)
+        self.last_raw_action = raw
+        self.last_mapped_action = mapped
+        return mapped
 
 
 class ResizeNormalizeObs(gym.ObservationWrapper):
-    """Resize RGB observations and normalize to [0, 1].
-
-    SB3's CNN policies typically work with channel-first images.
-    """
+    """Resize RGB observations and normalize to [0, 1]."""
 
     def __init__(self, env: gym.Env, width: int = 84, height: int = 84):
         super().__init__(env)
@@ -69,7 +99,7 @@ class ResizeNormalizeObs(gym.ObservationWrapper):
         self._height = int(height)
 
         # Expect original observations to be HWC uint8 images
-        h, w, c = self.observation_space.shape
+        _h, _w, c = self.observation_space.shape
         assert c == 3, f"Expected RGB observation, got shape {self.observation_space.shape}"
 
         # New observation is CHW float32
@@ -88,28 +118,26 @@ class ResizeNormalizeObs(gym.ObservationWrapper):
         return chw
 
 
-class CenterLineRewardWrapper(gym.Wrapper):
-    """Replace the environment reward with a lane-following shaped reward.
+class JetRacerRaceRewardWrapper(gym.Wrapper):
+    """Race-oriented reward shaping.
 
-    We use the simulator's lane estimator:
-    - dist: signed lateral distance to lane center (meters)
-    - angle_rad: heading error relative to lane tangent (radians)
-    - dot_dir: cosine-like alignment (1 is perfect forward, 0 sideways, <0 backwards)
-
-    The wrapper still returns the original info dict and adds extra keys under
-    info["centerline_reward"].
+    Rewards progress/speed, penalizes leaving the road, and discourages zig-zag steering.
+    Adds info under `info["race_reward"]`.
     """
 
-    def __init__(self, env: gym.Env, cfg: RewardConfig = RewardConfig()):
+    def __init__(self, env: gym.Env, cfg: RaceRewardConfig = RaceRewardConfig()):
         super().__init__(env)
         self.cfg = cfg
+        self._prev_steering: float = 0.0
 
     def step(self, action):
         obs, _base_reward, done, info = self.env.step(action)
 
         lane = self._extract_lane_position(info)
         speed = self._extract_speed(info)
-        done_why = self._extract_done_reason(info)
+        proximity = self._extract_proximity_penalty(info)
+        done_why = self._extract_done_code(info)
+        throttle, steering = self._extract_jetracer_raw_action()
 
         shaped_reward = 0.0
 
@@ -118,30 +146,43 @@ class CenterLineRewardWrapper(gym.Wrapper):
             angle_rad = float(lane.get("angle_rad", 0.0))
             dot_dir = float(lane.get("dot_dir", 0.0))
 
-            forward = max(0.0, dot_dir) * float(speed)
-            shaped_reward += self.cfg.w_forward * forward
+            progress = max(0.0, dot_dir) * float(speed)
+            shaped_reward += self.cfg.w_progress * progress
+            shaped_reward += self.cfg.w_speed * float(speed)
             shaped_reward -= self.cfg.w_center * abs(dist)
             shaped_reward -= self.cfg.w_heading * abs(angle_rad)
         else:
-            # If lane position is unavailable, give a small living penalty.
             shaped_reward -= 1.0
 
-        if done and done_why in {"invalid-pose", "out-of-road", "out-of-track"}:
+        shaped_reward += self.cfg.w_proximity * float(proximity)
+
+        shaped_reward -= self.cfg.w_steer * float(steering**2)
+        shaped_reward -= self.cfg.w_steer_rate * float((steering - self._prev_steering) ** 2)
+        self._prev_steering = float(steering)
+
+        if done and done_why == "invalid-pose":
             shaped_reward -= self.cfg.offroad_penalty
 
-        info = dict(info)  # avoid mutating upstream info
-        info["centerline_reward"] = {
+        info = dict(info)
+        info["race_reward"] = {
             "reward": float(shaped_reward),
             "speed": float(speed),
+            "proximity": float(proximity),
+            "throttle": float(throttle),
+            "steering": float(steering),
             "done_why": done_why,
             "lane": lane,
         }
-
         return obs, float(shaped_reward), done, info
+
+    def _extract_jetracer_raw_action(self) -> Tuple[float, float]:
+        if isinstance(self.env, JetRacerWrapper) and self.env.last_raw_action is not None:
+            raw = self.env.last_raw_action
+            return float(raw[0]), float(raw[1])
+        return 0.0, 0.0
 
     @staticmethod
     def _extract_lane_position(info: Dict) -> Optional[Dict]:
-        # Duckietown Simulator puts values under info["Simulator"].
         sim = info.get("Simulator") if isinstance(info, dict) else None
         if isinstance(sim, dict) and isinstance(sim.get("lane_position"), dict):
             return sim["lane_position"]
@@ -157,20 +198,33 @@ class CenterLineRewardWrapper(gym.Wrapper):
         return 0.0
 
     @staticmethod
-    def _extract_done_reason(info: Dict) -> Optional[str]:
+    def _extract_proximity_penalty(info: Dict) -> float:
+        sim = info.get("Simulator") if isinstance(info, dict) else None
+        if isinstance(sim, dict):
+            val = sim.get("proximity_penalty")
+            if val is not None:
+                return float(val)
+        return 0.0
+
+    @staticmethod
+    def _extract_done_code(info: Dict) -> str:
         sim = info.get("Simulator") if isinstance(info, dict) else None
         if isinstance(sim, dict):
             msg = sim.get("msg")
             if isinstance(msg, str):
-                return msg
-        return None
+                low = msg.lower()
+                if "invalid pose" in low:
+                    return "invalid-pose"
+                if "max_steps" in low or "max steps" in low:
+                    return "max-steps-reached"
+        return "in-progress"
 
 
 class TrainingVizCallback:
     """Lightweight training visualization.
 
     - If rendering is enabled, calls env.render() each step.
-    - Periodically prints lane metrics from info["centerline_reward"].
+    - Periodically prints lane metrics from info["race_reward"].
 
     Implemented as an SB3 callback (BaseCallback) to keep the main loop clean.
     """
@@ -199,7 +253,7 @@ class TrainingVizCallback:
                 if self._print_every > 0 and (self.num_timesteps % self._print_every == 0):
                     infos = self.locals.get("infos")
                     if isinstance(infos, (list, tuple)) and infos:
-                        extra = infos[0].get("centerline_reward") if isinstance(infos[0], dict) else None
+                        extra = infos[0].get("race_reward") if isinstance(infos[0], dict) else None
                         if isinstance(extra, dict):
                             lane = extra.get("lane") or {}
                             dist = lane.get("dist")
@@ -221,7 +275,10 @@ class TrainingVizCallback:
 
 
 def make_duckietown_env(map_name: str, seed: int, headless: bool) -> gym.Env:
-    """Create a DuckietownEnv with JetRacer-like (vel, steering) actions."""
+    """Create a DuckietownEnv.
+
+    Note: DuckietownEnv expects (vel, angle) in [-1, 1]; we wrap it to JetRacer actions.
+    """
 
     # Ensure pyglet headless mode is set BEFORE importing gym_duckietown.
     # (Duckietown sets pyglet options during import.)
@@ -254,7 +311,8 @@ def make_duckietown_env(map_name: str, seed: int, headless: bool) -> gym.Env:
 def build_env_fn(args: argparse.Namespace) -> Callable[[], gym.Env]:
     def _thunk() -> gym.Env:
         env = make_duckietown_env(map_name=args.map_name, seed=args.seed, headless=not args.render)
-        env = CenterLineRewardWrapper(env)
+        env = JetRacerWrapper(env)
+        env = JetRacerRaceRewardWrapper(env)
         env = ResizeNormalizeObs(env, width=args.obs_width, height=args.obs_height)
         return env
 
