@@ -1,0 +1,16 @@
+# Constraints to keep gym-duckietown (duckietown-gym-daffy 6.2.0) compatible
+# Key issue: numpy<=1.20.0 means numpy.typing.NDArray is unavailable.
+# So pin libraries that started requiring numpy.typing.NDArray.
+
+numpy==1.20.0
+Pillow==9.5.0
+
+# trimesh newer versions import numpy.typing.NDArray; pin to an older release.
+trimesh==3.9.43
+
+# Keep Gym API (not Gymnasium) for older Duckietown + SB3 v1.x
+gym==0.21.0
+pyglet==1.5.0
+
+# If using Stable-Baselines3 v1.8.0 in the same env
+pandas==1.3.5
