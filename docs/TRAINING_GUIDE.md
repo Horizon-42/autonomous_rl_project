@@ -163,7 +163,62 @@ python -m tensorboard.main --logdir runs/centerline --port 6007 --bind_all
 
 ---
 
-## 6. SB3 训练日志怎么读：`ep_len_mean` / `ep_rew_mean`
+## 6. 如何把已训练的模型“重新跑起来”（enjoy / evaluation）
+
+训练会保存一个 SB3 的模型文件（默认是 `models/centerline_ppo.zip`）。要在环境里重新跑起来（评估/看效果），你需要：
+
+1. 重新创建和训练时一致的 env + wrappers
+2. `PPO.load()` 加载 `.zip`
+3. 循环 `predict()` → `env.step()`（可选 `render()`）
+
+我已经提供了一个最小脚本：
+
+- `enjoy_jetracer_centerline.py`
+
+### 6.1 Headless 跑（服务器推荐）
+
+无窗口运行、只打印每个 episode 的长度/回报：
+
+```bash
+python enjoy_jetracer_centerline.py --model-path models/centerline_ppo.zip --episodes 3
+```
+
+### 6.2 带窗口渲染跑（需要显示器/GL）
+
+```bash
+python enjoy_jetracer_centerline.py --model-path models/centerline_ppo.zip --render --episodes 3
+```
+
+### 6.3 加键盘控制（需要 `--render`）
+
+开启键盘控制：
+
+```bash
+python enjoy_jetracer_centerline.py --model-path models/centerline_ppo.zip --render --keyboard
+```
+
+按键说明（尽量做得最小但够用）：
+
+- `M`：切换 `model` / `manual`
+- 手动模式 `manual` 下：方向键控制油门/转向（增量式）
+- `SPACE`：油门/转向归零
+- `R`：reset 当前 episode
+- `Q` 或 `ESC`：退出
+
+如果在服务器上没法弹窗口，可以用 headless 模式，或者用你本地机器跑（同一个模型文件复制过去即可）。
+
+### 6.4 Deterministic vs 非 deterministic
+
+- 默认（非 deterministic）会带一点随机性，更像训练时的策略。
+- 想更稳定地评估当前策略：
+
+```bash
+python enjoy_jetracer_centerline.py --model-path models/centerline_ppo.zip --deterministic --episodes 3
+```
+
+---
+
+## 7. SB3 训练日志怎么读：`ep_len_mean` / `ep_rew_mean`
 
 你在训练输出里看到的这段：
 
@@ -175,7 +230,7 @@ python -m tensorboard.main --logdir runs/centerline --port 6007 --bind_all
 
 是 SB3（Stable-Baselines3）对**最近一段时间内采样到的 episode**做的统计。
 
-### 6.1 `ep_len_mean` 是什么？
+### 7.1 `ep_len_mean` 是什么？
 
 - 全称：episode length mean
 - 含义：最近若干个 episode 的**平均长度**（平均多少 step 结束）
@@ -191,7 +246,7 @@ python -m tensorboard.main --logdir runs/centerline --port 6007 --bind_all
 - `ep_len_mean` 变大：车更不容易出界/撞墙，能“活更久”
 - 但注意：也可能是车学会了“慢慢挪着不死”，所以要结合 `ep_rew_mean` 看
 
-### 6.2 `ep_rew_mean` 是什么？
+### 7.2 `ep_rew_mean` 是什么？
 
 - 全称：episode reward mean（也叫 episode return mean）
 - 含义：最近若干个 episode 的**平均总回报**
@@ -202,7 +257,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 在你的脚本里，`r_t` 是 `JetRacerRaceRewardWrapper` 计算出来的 race reward（不是 Duckietown 默认 reward）。
 
-### 6.3 这两个数怎么结合起来判断“有没有进步”
+### 7.3 这两个数怎么结合起来判断“有没有进步”
 
 常见几种组合：
 
@@ -210,7 +265,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 - `ep_len_mean ↑` 但 `ep_rew_mean ↓`（或不涨）：可能在“苟活”——速度很慢但不出界
 - `ep_rew_mean ↑` 但 `ep_len_mean ↓`：可能变得更激进更快，但更容易冲出界；通常需要加大稳定性/出界惩罚
 
-### 6.4 为什么 `ep_rew_mean` 一开始可能是负的？
+### 7.4 为什么 `ep_rew_mean` 一开始可能是负的？
 
 这不一定是 bug，原因通常是：
 
@@ -222,7 +277,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 - 车更能保持在路上（`ep_len_mean` 上升）
 - `dot_dir * speed` 的“推进/速度项”开始占主导（`ep_rew_mean` 上升）
 
-### 6.5 这些指标数据从哪来？
+### 7.5 这些指标数据从哪来？
 
 你脚本里使用了：
 
@@ -234,7 +289,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 - `runs/centerline/monitor.csv`
 
-### 6.6 `time/*` 这些字段什么意思？
+### 7.6 `time/*` 这些字段什么意思？
 
 你看到的：
 
@@ -262,7 +317,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
   - 含义：到目前为止累计与环境交互的 step 总数。
   - 解读：这才是“训练预算”的核心尺度（比如 1e6 steps）。
 
-### 6.7 `train/*` 这些字段什么意思？（PPO 常见诊断指标）
+### 7.7 `train/*` 这些字段什么意思？（PPO 常见诊断指标）
 
 你看到的：
 
@@ -280,7 +335,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 它们大多是 PPO 的优化过程统计，用来判断更新是否“太猛/太弱”、价值函数是否在拟合，以及策略是否过早变得确定。
 
-#### 6.7.1 `approx_kl`（近似 KL 散度）
+#### 7.7.1 `approx_kl`（近似 KL 散度）
 
 - 含义：新旧策略分布的差异大小（PPO 用它监控每次更新是否偏离太多）。
 - 解读：
@@ -288,7 +343,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
   - 太小：更新很保守，学习可能慢。
 - 经验上：常见在 0.01 左右波动是比较正常的区间之一，但和任务、网络、归一化、奖励尺度都强相关。
 
-#### 6.7.2 `clip_fraction` / `clip_range`
+#### 7.7.2 `clip_fraction` / `clip_range`
 
 - `clip_range`
   - 含义：PPO 的 clip 超参数（比如 0.2），控制概率比率 $r_t(\theta)$ 被裁剪的范围。
@@ -298,38 +353,38 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
   - `clip_fraction` 很高：说明更新压力很大，很多样本都在被裁剪；可能需要更小 learning rate、或奖励尺度/优势过大。
   - `clip_fraction` 接近 0：更新很温和；可能学习偏慢。
 
-#### 6.7.3 `entropy_loss`
+#### 7.7.3 `entropy_loss`
 
 - 含义：策略熵项的 loss（在 SB3 里通常是负数）。它对应“探索度”的正则项。
 - 解读：
   - 熵更高（更随机）通常意味着探索更多；熵逐渐降低表示策略更确定。
   - 如果熵很早就降得很低，策略可能过早收敛到某个坏的习惯动作（比如一直慢速直走/一直打方向）。
 
-#### 6.7.4 `explained_variance`（价值函数解释方差）
+#### 7.7.4 `explained_variance`（价值函数解释方差）
 
 - 含义：价值网络对回报的拟合程度指标，范围一般在 $(-\infty, 1]$，越接近 1 越好。
 - 解读：
   - 接近 1：价值函数拟合得不错（不代表策略一定好，但训练通常更稳定）。
   - 接近 0 或负：价值函数几乎没学到或在发散；可能 reward 太噪/尺度不合适/学习率太大。
 
-#### 6.7.5 `policy_gradient_loss`
+#### 7.7.5 `policy_gradient_loss`
 
 - 含义：策略梯度项（actor）对应的 loss。
 - 解读：绝对值不太好直接横向比较，更适合看是否突然爆炸、或长期几乎不变（卡住）。
 
-#### 6.7.6 `value_loss`
+#### 7.7.6 `value_loss`
 
 - 含义：价值函数（critic）的回归误差。
 - 解读：
   - 偏大：可能回报尺度太大/太噪，或者 critic 学不过来。
   - 偏小：critic 拟合不错；但仍要看 `explained_variance` 是否高。
 
-#### 6.7.7 `loss`
+#### 7.7.7 `loss`
 
 - 含义：训练总 loss（把 policy loss、value loss、entropy loss 等组合起来）。
 - 解读：它不是直接的“性能指标”；更重要的还是 `rollout/ep_rew_mean`、成功率、是否完成一圈等任务指标。
 
-#### 6.7.8 `std`
+#### 7.7.8 `std`
 
 - 含义：策略分布的标准差（对连续动作策略很常见）。
 - 解读：
@@ -337,7 +392,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
   - `std` 小：动作更确定（探索更少）。
   - 如果 `std` 过早变得很小，可能探索不够；可以考虑提高熵系数（如果你改了默认值）或调整奖励让探索更有梯度。
 
-#### 6.7.9 `learning_rate` / `n_updates`
+#### 7.7.9 `learning_rate` / `n_updates`
 
 - `learning_rate`
   - 含义：当前优化学习率（如果使用 schedule 可能会变化；你现在多半是常数）。
@@ -354,7 +409,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 ---
 
-## 7. 你如何开始“自己改奖励”（实践路线）
+## 8. 你如何开始“自己改奖励”（实践路线）
 
 建议按这个顺序（每一步只改一点，容易定位问题）：
 
@@ -370,11 +425,11 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 ---
 
-## 8. 进阶：加 checkpoint 奖励（推荐先做这个）
+## 9. 进阶：加 checkpoint 奖励（推荐先做这个）
 
 “完成一圈”通常需要你能可靠判断是否绕回起点；对新手来说 **checkpoint 更容易**。
 
-### 8.1 你需要什么信息
+### 9.1 你需要什么信息
 
 你可以从 `info["Simulator"]` 里拿到：
 
@@ -383,7 +438,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 
 `tile_coords` 很适合作为 checkpoint 的离散状态。
 
-### 8.2 最小实现思路
+### 9.2 最小实现思路
 
 在 `JetRacerRaceRewardWrapper` 里加两个状态：
 
@@ -395,7 +450,7 @@ $$R_{episode} = \sum_{t=0}^{T-1} r_t$$
 - 当前 tile 是否等于 `checkpoints[next_cp_idx]`
 - 如果是：给奖励 `+cp_reward`，然后 `next_cp_idx += 1`
 
-### 8.3 建议的“第一次实现”（伪代码）
+### 9.3 建议的“第一次实现”（伪代码）
 
 把下面逻辑放在 [train_jetracer_centerline.py](train_jetracer_centerline.py) 的 `JetRacerRaceRewardWrapper.step()` 里（在构造 `info["race_reward"]` 之前）：
 
@@ -412,7 +467,7 @@ if isinstance(tile, (list, tuple)) and len(tile) == 2:
         self._next_cp_idx = (self._next_cp_idx + 1) % len(self._checkpoints)
 ```
 
-### 8.4 怎么选 checkpoint
+### 9.4 怎么选 checkpoint
 
 最简单：
 
@@ -422,14 +477,14 @@ if isinstance(tile, (list, tuple)) and len(tile) == 2:
 
 ---
 
-## 9. 再进阶：完成一圈奖励（在 checkpoint 之后做）
+## 10. 再进阶：完成一圈奖励（在 checkpoint 之后做）
 
 完成一圈最稳的做法：
 
 - 定义一组 checkpoint 构成“路线”
 - 当你按顺序通过所有 checkpoint，再回到起点 checkpoint，给 “lap 完成奖励”
 
-### 9.1 最小实现思路
+### 10.1 最小实现思路
 
 状态机：
 
@@ -447,7 +502,7 @@ if hit_checkpoint:
     self._next_cp_idx = (self._next_cp_idx + 1) % len(self._checkpoints)
 ```
 
-### 9.2 常见坑
+### 10.2 常见坑
 
 - **抖动重复触发**：车在 checkpoint tile 上停留多步，会反复给奖励。
   - 简单修复：加一个 `self._last_tile`，只在 tile 变化时允许触发。
@@ -456,7 +511,7 @@ if hit_checkpoint:
 
 ---
 
-## 10. 建议你接下来怎么做（循序渐进）
+## 11. 建议你接下来怎么做（循序渐进）
 
 1. 先跑 200k~1M steps，确保能在 `loop_empty` 上稳定不出界
 2. 加 4~8 个 checkpoint 奖励，让策略更像“跑圈”而不是“原地抖动”

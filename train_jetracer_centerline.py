@@ -274,7 +274,15 @@ class TrainingVizCallback:
         return self._impl
 
 
-def make_duckietown_env(map_name: str, seed: int, headless: bool) -> gym.Env:
+def make_duckietown_env(
+    map_name: str,
+    seed: int,
+    headless: bool,
+    *,
+    domain_rand: bool = False,
+    style: str = "photos",
+    user_tile_start: Optional[Tuple[int, int]] = None,
+) -> gym.Env:
     """Create a DuckietownEnv.
 
     Note: DuckietownEnv expects (vel, angle) in [-1, 1]; we wrap it to JetRacer actions.
@@ -290,12 +298,14 @@ def make_duckietown_env(map_name: str, seed: int, headless: bool) -> gym.Env:
     env = DuckietownEnv(
         seed=seed,
         map_name=map_name,
-        domain_rand=False,
+        domain_rand=domain_rand,
         draw_curve=False,
         draw_bbox=False,
         max_steps=1000,
         camera_width=160,
         camera_height=120,
+        style=style,
+        user_tile_start=user_tile_start,
         # Makes lane_position available in info (and is generally useful for training)
         full_transparency=True,
     )
@@ -310,7 +320,15 @@ def make_duckietown_env(map_name: str, seed: int, headless: bool) -> gym.Env:
 
 def build_env_fn(args: argparse.Namespace) -> Callable[[], gym.Env]:
     def _thunk() -> gym.Env:
-        env = make_duckietown_env(map_name=args.map_name, seed=args.seed, headless=not args.render)
+        user_tile_start = tuple(args.user_tile_start) if args.user_tile_start is not None else None
+        env = make_duckietown_env(
+            map_name=args.map_name,
+            seed=args.seed,
+            headless=not args.render,
+            domain_rand=args.domain_rand,
+            style=args.style,
+            user_tile_start=user_tile_start,
+        )
         env = JetRacerWrapper(env)
         env = JetRacerRaceRewardWrapper(env)
         env = ResizeNormalizeObs(env, width=args.obs_width, height=args.obs_height)
@@ -324,6 +342,31 @@ def main() -> None:
 
     parser.add_argument("--map-name", type=str, default="loop_empty", help="Duckietown map name")
     parser.add_argument("--seed", type=int, default=0)
+
+    # Rendering/appearance knobs. NOTE: changing these can change the observation distribution.
+    parser.add_argument(
+        "--style",
+        type=str,
+        default="photos",
+        choices=["photos", "synthetic"],
+        help="Tile texture style (synthetic is usually brighter).",
+    )
+    parser.add_argument(
+        "--domain-rand",
+        action="store_true",
+        help="Enable domain randomization (includes lighting changes; can look brighter).",
+    )
+
+    # Spawn control: lock the start tile so each episode starts on the same tile.
+    # This helps when `style=photos` yields different brightness across tiles.
+    parser.add_argument(
+        "--user-tile-start",
+        nargs=2,
+        type=int,
+        default=None,
+        metavar=("I", "J"),
+        help="Force the spawn tile coords (i j). Example: --user-tile-start 1 1",
+    )
 
     parser.add_argument("--obs-width", type=int, default=84)
     parser.add_argument("--obs-height", type=int, default=84)
