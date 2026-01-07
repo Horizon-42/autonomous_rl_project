@@ -1,4 +1,4 @@
-import gymnasium as gym
+import gym
 import gym_duckietown
 from gym_duckietown.envs import DuckietownEnv
 
