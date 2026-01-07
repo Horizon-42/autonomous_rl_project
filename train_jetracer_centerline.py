@@ -291,7 +291,7 @@ def main() -> None:
     try:
         from stable_baselines3 import PPO
         from stable_baselines3.common.logger import configure
-        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
     except ModuleNotFoundError as e:  # pragma: no cover
         missing = getattr(e, "name", None)
         if missing == "torch":
@@ -308,6 +308,9 @@ def main() -> None:
 
     env_fns = [build_env_fn(args) for _ in range(args.n_envs)]
     vec_env = SubprocVecEnv(env_fns) if args.n_envs > 1 else DummyVecEnv(env_fns)
+
+    # Record episode returns/lengths so TensorBoard can plot reward curves (rollout/ep_rew_mean).
+    vec_env = VecMonitor(vec_env, filename=os.path.join(args.log_dir, "monitor.csv"))
 
     # SB3 logger
     # TensorBoard is optional; fall back to stdout-only if not installed.
